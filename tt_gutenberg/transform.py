@@ -7,50 +7,100 @@ DATA = ("https://raw.githubusercontent.com/rfordatascience/"
         "tidytuesday/main/data/2025/2025-06-03/")
 
 
+def describe_data():
+    """DIAG: one-line summary of whatever `DATA` currently holds."""
+    if not isinstance(DATA, dict):
+        return f"type(DATA)={type(DATA).__name__} DATA={DATA!r:.120}"
+
+    parts = []
+    for key, value in DATA.items():
+        part = f"{key!r}:{type(value).__name__}"
+        if isinstance(value, pd.DataFrame):
+            part += f"{list(value.columns)}"
+        else:
+            part += f"={value!r:.60}"
+        parts.append(part)
+    return f"type(DATA)=dict keys={list(DATA)} | " + " | ".join(parts)
+
+
 def data_path(name):
     """Return the location of one Gutenberg CSV file.
 
-    `DATA` is normally the folder holding the files, but it can also
-    be a mapping of short names to locations, so the loaders keep
-    working if the source is pointed somewhere else.
+    `DATA` is normally the folder holding the files. It can also be a
+    mapping of names to locations, so the loaders keep working when
+    the data is pointed somewhere else.
     """
     if isinstance(DATA, dict):
-        return DATA[name]
+        for key in [name, f"gutenberg_{name}", f"{name}.csv",
+                    f"gutenberg_{name}.csv"]:
+            if key in DATA:
+                return DATA[key]
+        raise RuntimeError(f"DIAG data_path({name!r}) failed; "
+                           f"{describe_data()}")
+
     return f"{DATA}gutenberg_{name}.csv"
+
+
+def read_table(name):
+    """Read one Gutenberg table by short name."""
+    source = data_path(name)
+
+    if isinstance(source, pd.DataFrame):
+        return source
+
+    return pd.read_csv(source, low_memory=False)
 
 
 def load_authors():
     """Load the authors table (one row per Gutenberg author)."""
-    return pd.read_csv(data_path("authors"))
+    return read_table("authors")
 
 
 def load_metadata():
     """Load the book metadata (one row per Gutenberg book)."""
-    return pd.read_csv(data_path("metadata"), low_memory=False)
+    return read_table("metadata")
 
 
 def get_data():
-    """Merge the authors and metadata tables into one data frame.
-
-    Each row is a book, with that book's author details joined on.
-    """
-    authors = load_authors()
-    metadata = load_metadata()
-
-    return metadata.merge(authors, on="gutenberg_author_id", how="left")
+    """Merge the authors and metadata tables into one data frame."""
+    try:
+        authors = load_authors()
+        metadata = load_metadata()
+        return metadata.merge(authors, on="gutenberg_author_id",
+                              how="left")
+    except Exception as error:
+        if str(error).startswith("DIAG"):
+            raise
+        raise RuntimeError(f"DIAG get_data failed "
+                           f"({type(error).__name__}: {error}); "
+                           f"{describe_data()}") from error
 
 
 def name_column(df):
     """Return the column holding author names.
 
     Both source files have an `author` column, so a plain merge
-    renames them `author_x` and `author_y`. This finds whichever one
-    is present.
+    renames them `author_x` and `author_y`. This finds whichever
+    spelling is present.
     """
-    for column in ["author", "author_y", "author_x", "alias"]:
+    candidates = ["author", "author_x", "author_y", "author_name",
+                  "name", "alias", "aliases"]
+
+    for column in candidates:
         if column in df.columns:
             return column
-    raise KeyError("no author name column found")
+
+    raise RuntimeError(f"DIAG no author name column; "
+                       f"columns={list(df.columns)}")
+
+
+def alias_column(df):
+    """Return the column holding author aliases."""
+    for column in ["alias", "aliases", "alias_x", "alias_y"]:
+        if column in df.columns:
+            return column
+
+    return name_column(df)
 
 
 def count_translations(df):
@@ -64,6 +114,7 @@ def add_translations(df):
     """Add an `n_languages` column to a merged data frame."""
     if "n_languages" in df.columns:
         return df
+
     counts = count_translations(df)
     return df.merge(counts, on=name_column(df), how="left")
 
