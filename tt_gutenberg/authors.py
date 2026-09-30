@@ -2,16 +2,14 @@
 
 import seaborn as sns
 from tt_gutenberg.transform import (add_birth_century, add_translations,
-                                    drop_missing, drop_unnamed, get_data)
+                                    drop_missing, drop_unnamed, get_data,
+                                    name_column)
 
 
 def author_table():
     """Return one row per author, with their translation count."""
     df = add_translations(get_data())
-
-    # get_data() has one row per book, so the same author repeats.
-    # keep the first row for each author to get one row each.
-    return df.drop_duplicates(subset=["gutenberg_author_id"])
+    return df.drop_duplicates(subset=[name_column(df)])
 
 
 def list_authors(by_languages=True, alias=True):
@@ -21,14 +19,13 @@ def list_authors(by_languages=True, alias=True):
         by_languages (bool): Sort by translation count, highest
             first. When False, keep the original file order.
         alias (bool): Return the `alias` column. When False, return
-            the `author` column instead.
+            the author name column instead.
 
     Returns:
         list of str: The author names or aliases.
     """
-    column = "alias" if alias else "author"
-
     df = author_table()
+    column = "alias" if alias else name_column(df)
 
     # most rows have no alias at all, so those go before the list is
     # built, otherwise the result is full of NaN
@@ -41,17 +38,30 @@ def list_authors(by_languages=True, alias=True):
     return df[column].tolist()
 
 
+def plot_prep(over="birth_century"):
+    """Build the data frame that `plot_translations` draws.
+
+    One row per author, with a translation count and, when plotting
+    over birth century, a `birth_century` column.
+    """
+    df = author_table()
+    df = drop_missing(df, name_column(df))
+    df = drop_unnamed(df, name_column(df))
+
+    if over == "birth_century":
+        df = df.dropna(subset=["birthdate"])
+        df = add_birth_century(df)
+
+    return df
+
+
 def plot_translations(over="birth_century"):
     """Bar plot of average translations per author birth century.
 
     Each bar is the mean number of languages for authors born in that
     century. Seaborn draws a 95% confidence interval on each bar.
     """
-    df = author_table()
-    df = drop_missing(df, "author")
-    df = drop_unnamed(df, "author")
-    df = df.dropna(subset=["birthdate"])
-    df = add_birth_century(df)
+    df = plot_prep(over)
 
     ax = sns.barplot(data=df, x=over, y="n_languages")
     ax.set_xlabel("Century of birth")
