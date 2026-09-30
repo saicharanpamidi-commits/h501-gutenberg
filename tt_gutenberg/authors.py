@@ -1,93 +1,69 @@
 """Author listings and plots built on the merged Gutenberg data."""
 
 import seaborn as sns
-from tt_gutenberg import transform
-from tt_gutenberg.transform import (add_birth_century, add_translations,
-                                    alias_column, drop_missing,
-                                    drop_unnamed, get_data, name_column)
-
-
-def diag(where, error, df):
-    """DIAG: one-line report of what a function actually received."""
-    message = str(error)
-    if message.startswith("DIAG"):
-        message = message[len("DIAG "):]
-    return RuntimeError(
-        f"DIAG {where}: {type(error).__name__}: {message}; "
-        f"df={type(df).__name__} cols={list(getattr(df, 'columns', []))}; "
-        f"authors.get_data={type(get_data).__name__}; "
-        f"transform.get_data={type(transform.get_data).__name__}")
-
-
-def author_table(df):
-    """Return one row per author, with their translation count."""
-    df = add_translations(df)
-    return df.drop_duplicates(subset=[name_column(df)])
+from tt_gutenberg.transform import get_data
 
 
 def list_authors(by_languages=True, alias=True):
     """List Gutenberg authors, most translated first.
 
     Args:
-        by_languages (bool): Sort by translation count, highest
-            first. When False, keep the original file order.
-        alias (bool): Return the alias column. When False, return the
-            author name column instead.
+        by_languages (bool): Sort by the number of distinct languages
+            each author's books appear in, highest first. When False,
+            keep the order the authors first appear in the data.
+        alias (bool): Return author aliases. When False, return the
+            author names instead.
 
     Returns:
-        list of str: The author names or aliases.
+        list of str: The author aliases or names.
     """
-    raw = None
-    try:
-        raw = get_data()
-        df = author_table(raw)
-        column = alias_column(df) if alias else name_column(df)
+    column = "author_alias" if alias else "author"
 
-        # most rows have no alias at all, so those go before the list
-        # is built, otherwise the result is full of NaN
-        df = drop_missing(df, column)
-        df = drop_unnamed(df, column)
+    # most authors have no alias, so drop those rows rather than
+    # listing NaN
+    df = get_data().dropna(subset=[column])
 
-        if by_languages:
-            df = df.sort_values("n_languages", ascending=False)
+    if by_languages:
+        counts = df.groupby(column)["language"].nunique()
+        return counts.sort_values(ascending=False).index.tolist()
 
-        return df[column].tolist()
-    except Exception as error:
-        raise diag("list_authors", error, raw) from error
+    return df[column].drop_duplicates().tolist()
 
 
 def plot_prep(over="birth_century"):
-    """Build the data frame that `plot_translations` draws."""
-    raw = None
-    try:
-        raw = get_data()
-        df = author_table(raw)
-        key = name_column(df)
+    """Build one row per author with a translation count and century.
 
-        df = drop_missing(df, key)
-        df = drop_unnamed(df, key)
+    Drops placeholder authors such as "Anonymous", since they aren't
+    real people with a birthdate. `over` is only there to match
+    `plot_translations`; birth century is the only option so far.
+    """
+    df = get_data().dropna(subset=["author", "birthdate"])
+    df = df[~df["author"].isin(["Anonymous", "Various", "Unknown"])]
 
-        if over == "birth_century":
-            df = df.dropna(subset=["birthdate"])
-            df = add_birth_century(df)
+    per_author = df.groupby("author").agg(
+        n_languages=("language", "nunique"),
+        birthdate=("birthdate", "first"),
+    )
 
-        return df
-    except Exception as error:
-        raise diag("plot_prep", error, raw) from error
+    # floor divide by 100 then multiply back: 1753 becomes 1700
+    century = (per_author["birthdate"] // 100) * 100
+    per_author["birth_century"] = century.astype(int)
+
+    return per_author.reset_index()
 
 
 def plot_translations(over="birth_century"):
-    """Bar plot of average translations per author birth century.
+    """Bar plot of average translation count by author birth century.
 
-    Each bar is the mean number of languages for authors born in that
-    century. Seaborn draws a 95% confidence interval on each bar.
+    Seaborn's barplot shows the mean of each group and draws a 95%
+    confidence interval on each bar by default.
     """
     df = plot_prep(over)
 
     ax = sns.barplot(data=df, x=over, y="n_languages")
-    ax.set_xlabel("Century of birth")
-    ax.set_ylabel("Average number of languages")
     ax.set_title("Translation Count Over Birth Century")
+    ax.set_xlabel("Birth century")
+    ax.set_ylabel("Average number of languages")
     ax.tick_params(axis="x", rotation=90)
 
     return ax

@@ -8,14 +8,13 @@ been translated into, using the
 
 ```
 tt_gutenberg/
-├── __init__.py    exposes list_authors and plot_translations
-├── data.py        loads the CSVs and counts translations per author
-├── authors.py     list_authors(), built on data.py
-└── plots.py       plot_translations(), built on data.py
+├── __init__.py    exposes get_data, list_authors and plot_translations
+├── transform.py   get_data(): loads the two CSVs and merges them
+└── authors.py     list_authors(), plot_prep() and plot_translations()
 ```
 
-`authors.py` and `plots.py` both call functions in `data.py`, so the
-loading and joining logic is written once.
+`authors.py` gets its data from `transform.get_data()`, so the loading
+and merging happen in one place.
 
 ## Usage
 
